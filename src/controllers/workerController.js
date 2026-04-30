@@ -19,6 +19,10 @@ export async function runWorkerForever(view) {
   const settings = loadWorkerSettings();
   const openRouter = loadOpenRouterSettings();
 
+  view.info(
+    `startup: MongoDB database="${settings.dbName}" collection="${settings.collectionName}"`
+  );
+
   const client = new MongoClient(settings.mongoUri);
   await client.connect();
 
@@ -32,8 +36,8 @@ export async function runWorkerForever(view) {
   };
 
   view.info(
-    `worker started db=${settings.dbName} collection=${settings.collectionName} ` +
-      `sleep_s=${settings.sleepS} idle_sleep_s=${settings.idleSleepS} model=${openRouter.model}`
+    `Mongo connected; worker running model=${openRouter.model} ` +
+      `sleep_s=${settings.sleepS} idle_sleep_s=${settings.idleSleepS}`
   );
 
   let processed = 0;
