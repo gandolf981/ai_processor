@@ -1,0 +1,12 @@
+services:
+  telegram-processor:
+    build: .
+    container_name: telegram-processor
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Defaults (can be overridden in .env)
+      MONGO_DB: test_telegram_db
+      MONGO_COLLECTION: message
+      OPENROUTER_MODEL: google/gemma-4-26b-a4b-it:free
