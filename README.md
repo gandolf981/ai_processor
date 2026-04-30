@@ -5,7 +5,7 @@
 - `confidence`: همیشه `0`
 - `processor`: خروجی AI شامل:
   - `result`: فقط متن خروجی (بدون reasoning)
-  - `type`: یکی از `News | Analysis | Signal | Other`
+  - `type`: یکی از `News | Analysis | Signal | Signal-live | Other` (سیگنال‌های خیلی کوتاه/مبهم که ساختار Signal کامل ندارند → `Signal-live`)
   - `type_confidence`: عدد بین 0..1
   - `structure_confidence`: عدد بین 0..1
   - `structure`: ساختار مناسب نوع

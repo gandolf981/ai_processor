@@ -26,13 +26,17 @@ function buildPrompt(text) {
   return (
     "You are a classifier+extractor for Telegram messages.\n" +
     "Given the input text, do ALL of the following:\n" +
-    "1) Decide the message type: News | Analysis | Signal | Other\n" +
+    "1) Decide the message type: News | Analysis | Signal | Signal-live | Other\n" +
     "2) Provide type_confidence (0..1)\n" +
     "3) Build a JSON 'structure' appropriate to the type, and provide structure_confidence (0..1)\n" +
     "4) Provide 'result' as a short plain-text summary of the message (NO reasoning, NO markdown, no extra formatting)\n\n" +
     "SIGNAL RULE (very important):\n" +
     "- Only output type=Signal if the message clearly contains a tradable signal with enough fields to fill the Signal schema.\n" +
-    "- If the action/side (BUY/SELL) is missing, or symbol is unclear, or entry/SL/TP are missing/ambiguous, classify as Other (NOT Signal).\n\n" +
+    "- If the message is clearly signal-like (e.g. a live call to buy/sell an asset) but you CANNOT reliably fill the Signal schema " +
+    "(too short/vague: unclear symbol formatting, missing entry/SL/TP, ambiguous instrument — e.g. \"Gold Sell now\"), " +
+    "use type=Signal-live (NOT Signal, NOT Other).\n" +
+    "- Signal-live: structure MUST be {} ; structure_confidence should reflect that structure is intentionally empty.\n" +
+    "- If it is NOT signal-like at all, classify as Other.\n\n" +
     "STRUCTURE SCHEMAS (use ONLY the schema for the selected type):\n" +
     "- If type=News, structure must be an object with keys:\n" +
     '  {"topic": string, "industry": string|null, "tags": string[], "news_summary": string, "news_analysis": string|null, ' +
@@ -43,11 +47,12 @@ function buildPrompt(text) {
     "- If type=Signal, structure must be an object with keys:\n" +
     '  {"symbol": string, "action": "BUY"|"SELL", "entry": string|null, "stop_loss": number|null, ' +
     '   "take_profits": (number|string)[]|null, "note": string|null}\n' +
-    "- If type=Other, structure must be an empty object: {}\n\n" +
+    "- If type=Other, structure must be an empty object: {}\n" +
+    "- If type=Signal-live, structure must be an empty object: {} (short/live signal text only; no forced fields).\n\n" +
     "OUTPUT REQUIREMENTS:\n" +
     "- Output MUST be a single JSON object and NOTHING ELSE.\n" +
     "- JSON keys MUST be exactly: result, type, type_confidence, structure_confidence, structure\n" +
-    "- type must be exactly one of: News, Analysis, Signal, Other\n" +
+    "- type must be exactly one of: News, Analysis, Signal, Signal-live, Other\n" +
     "- type_confidence and structure_confidence must be numbers between 0 and 1.\n\n" +
     "Input text:\n" +
     `${text}\n`
@@ -97,14 +102,18 @@ function normalizePayload(payload) {
     result = result == null ? "" : String(result);
   }
 
-  const allowed = new Set(["News", "Analysis", "Signal", "Other"]);
+  const allowed = new Set(["News", "Analysis", "Signal", "Signal-live", "Other"]);
   let msgType = payload.type;
   if (!allowed.has(msgType)) msgType = "Other";
 
-  const structure =
+  let structure =
     payload.structure && typeof payload.structure === "object" && !Array.isArray(payload.structure)
       ? payload.structure
       : {};
+
+  if (msgType === "Signal-live") {
+    structure = {};
+  }
 
   return {
     result: result.trim(),
