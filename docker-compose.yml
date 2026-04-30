@@ -6,7 +6,8 @@ services:
     env_file:
       - .env
     environment:
-      # Defaults (can be overridden in .env)
-      MONGO_DB: test_telegram_db
-      MONGO_COLLECTION: message
-      OPENROUTER_MODEL: google/gemma-4-26b-a4b-it:free
+      # literals در اینجا همیشه روی env_file غلبه می‌کنند؛ برای اولویت Dokploy از interpolation استفاده می‌کنیم.
+      # ترتیب برای ${VAR:-default}: متغیر محیط هاست (Dokploy/CI) → فایل .env کنار compose → پیش‌فرض بعد از :-
+      MONGO_DB: ${MONGO_DB:-test_telegram_db}
+      MONGO_COLLECTION: ${MONGO_COLLECTION:-message}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-26b-a4b-it:free}
