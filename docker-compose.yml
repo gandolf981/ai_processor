@@ -1,7 +1,7 @@
 services:
   telegram-processor:
     build: .
-    container_name: telegram-processor
+    container_name: ${NAME:-telegram-processor}
     restart: unless-stopped
     env_file:
       - .env
