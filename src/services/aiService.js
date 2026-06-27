@@ -6,6 +6,20 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+export class OpenRouterRateLimitError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ retryAfterS?: number | null, quotaExhausted?: boolean, status?: number }} [options]
+   */
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "OpenRouterRateLimitError";
+    this.retryAfterS = options.retryAfterS ?? null;
+    this.quotaExhausted = Boolean(options.quotaExhausted);
+    this.status = options.status ?? 429;
+  }
+}
+
 /**
  * @param {Headers} headers
  * @returns {number | null} seconds, capped
@@ -20,6 +34,15 @@ function parseRetryAfterSeconds(headers) {
 
 function jitterSeconds(maxExtra = 3) {
   return Math.random() * maxExtra;
+}
+
+function looksLikeQuotaExhausted(errText) {
+  const s = String(errText).toLowerCase();
+  return (
+    s.includes("free-models-per-day") ||
+    s.includes("add 10 credits") ||
+    s.includes("accumulate your rate limits")
+  );
 }
 
 function buildPrompt(text) {
@@ -174,11 +197,19 @@ export async function analyzeText(text, options, log = console) {
 
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
+        const retryAfterS = parseRetryAfterSeconds(resp.headers);
+        if (resp.status === 429 && looksLikeQuotaExhausted(errText)) {
+          throw new OpenRouterRateLimitError(
+            `HTTP 429 quota/rate limit: ${errText.slice(0, 500)}`,
+            { retryAfterS, quotaExhausted: true, status: resp.status }
+          );
+        }
+
         const err = new Error(`HTTP ${resp.status}: ${errText.slice(0, 500)}`);
         /** @type {Error & { httpStatus?: number, retryAfterS?: number | null }} */
         const tagged = err;
         tagged.httpStatus = resp.status;
-        tagged.retryAfterS = parseRetryAfterSeconds(resp.headers);
+        tagged.retryAfterS = retryAfterS;
         throw tagged;
       }
 
@@ -193,6 +224,11 @@ export async function analyzeText(text, options, log = console) {
       return { normalized: normalizePayload(parsed), raw };
     } catch (e) {
       lastErr = e;
+      if (e instanceof OpenRouterRateLimitError && e.quotaExhausted) {
+        log.error(`OpenRouter quota/rate limit exhausted: ${String(e)}`);
+        throw e;
+      }
+
       if (attempt < maxRetries) {
         const tagged = /** @type {Error & { httpStatus?: number, retryAfterS?: number | null }} */ (
           e

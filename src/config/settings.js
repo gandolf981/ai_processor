@@ -78,5 +78,10 @@ export function loadOpenRouterSettings() {
       5,
       num(process.env.OPENROUTER_RATE_LIMIT_BACKOFF_SECONDS, 45)
     ),
+    /** Worker-level pause when OpenRouter reports quota exhaustion/free-model daily limits. */
+    quotaCooldownS: Math.max(
+      60,
+      num(process.env.OPENROUTER_QUOTA_COOLDOWN_SECONDS, 30 * 60)
+    ),
   };
 }

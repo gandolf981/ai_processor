@@ -60,6 +60,7 @@ docker compose logs -f telegram-processor
   - `mongodb://administrator:<PASSWORD>@144.172.92.16:27017/?authSource=admin`
 - **`OPENROUTER_API_KEY`**: کلید OpenRouter
 - **`OPENROUTER_MODEL`**: پیش‌فرض `google/gemma-4-26b-a4b-it:free`
+- **`OPENROUTER_QUOTA_COOLDOWN_SECONDS`**: مکث worker بعد از خطای quota/rate limit روزانه OpenRouter؛ پیش‌فرض `1800` ثانیه.
 - **Idempotent**: اگر سند قبلاً `processor.result` و `processor.type` داشته باشد دوباره پردازش نمی‌شود.
 
 ## نکته امنیتی

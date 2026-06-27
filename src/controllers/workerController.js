@@ -10,6 +10,7 @@ import { MessageRepository } from "../models/messageRepository.js";
 import {
   analyzeText,
   defaultProcessorForEmptyText,
+  OpenRouterRateLimitError,
 } from "../services/aiService.js";
 
 /**
@@ -117,6 +118,16 @@ export async function runWorkerForever(view) {
         view.info(`done document _id=${_id} processed_total=${processed}`);
       } catch (e) {
         view.error(`OpenRouter failed _id=${_id} (will retry later)`, e);
+        if (e instanceof OpenRouterRateLimitError && e.quotaExhausted) {
+          const waitS =
+            e.retryAfterS != null && e.retryAfterS > 0
+              ? Math.max(e.retryAfterS, openRouter.quotaCooldownS)
+              : openRouter.quotaCooldownS;
+          view.warn(
+            `OpenRouter quota exhausted; pausing worker ${Math.round(waitS)}s before polling again`
+          );
+          await delay(waitS * 1000);
+        }
       }
 
       view.info(`cooldown: sleeping ${settings.sleepS}s before next job`);
