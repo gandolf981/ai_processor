@@ -38,6 +38,7 @@ export async function runWorkerForever(view) {
 
   view.info(
     `Mongo connected; worker running model=${openRouter.model} ` +
+      `fallback_models=${openRouter.fallbackModels.length} ` +
       `sleep_s=${settings.sleepS} idle_sleep_s=${settings.idleSleepS}`
   );
 
@@ -102,7 +103,9 @@ export async function runWorkerForever(view) {
       view.info(
         `AI request _id=${_id} text_len=${text.length} preview=${JSON.stringify(view.safeRepr(text))}`
       );
-      view.info(`calling OpenRouter _id=${_id} model=${openRouter.model}`);
+      view.info(
+        `calling OpenRouter _id=${_id} model=${openRouter.model} fallback_models=${openRouter.fallbackModels.length}`
+      );
 
       try {
         const { normalized } = await analyzeText(text, openRouter, aiLog);
@@ -121,7 +124,7 @@ export async function runWorkerForever(view) {
         if (e instanceof OpenRouterRateLimitError && e.quotaExhausted) {
           const waitS =
             e.retryAfterS != null && e.retryAfterS > 0
-              ? Math.max(e.retryAfterS, openRouter.quotaCooldownS)
+              ? Math.min(e.retryAfterS, openRouter.quotaCooldownS)
               : openRouter.quotaCooldownS;
           view.warn(
             `OpenRouter quota exhausted; pausing worker ${Math.round(waitS)}s before polling again`

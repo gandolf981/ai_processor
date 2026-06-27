@@ -7,6 +7,13 @@ function num(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function csv(v) {
+  return String(v || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
 export function loadWorkerSettings() {
   const mongoUri = (process.env.MONGO_URI || "").trim();
   if (!mongoUri) {
@@ -48,6 +55,9 @@ export function loadOpenRouterSettings() {
     process.env.OPENROUTER_MODEL || "google/gemma-4-26b-a4b-it:free"
   ).trim();
   if (!model) model = "google/gemma-4-26b-a4b-it:free";
+  const fallbackModels = csv(process.env.OPENROUTER_FALLBACK_MODELS).filter(
+    (fallbackModel) => fallbackModel !== model
+  );
 
   /** @type {{ enabled: boolean } | null} */
   let reasoning = null;
@@ -69,6 +79,7 @@ export function loadOpenRouterSettings() {
   return {
     apiKey,
     model,
+    fallbackModels,
     reasoning,
     timeoutS: Math.max(1, Math.floor(num(process.env.OPENROUTER_TIMEOUT_SECONDS, 60))),
     maxRetries: Math.max(1, Math.floor(num(process.env.OPENROUTER_MAX_RETRIES, 6))),
@@ -80,8 +91,8 @@ export function loadOpenRouterSettings() {
     ),
     /** Worker-level pause when OpenRouter reports quota exhaustion/free-model daily limits. */
     quotaCooldownS: Math.max(
-      60,
-      num(process.env.OPENROUTER_QUOTA_COOLDOWN_SECONDS, 30 * 60)
+      5,
+      num(process.env.OPENROUTER_QUOTA_COOLDOWN_SECONDS, 5)
     ),
   };
 }

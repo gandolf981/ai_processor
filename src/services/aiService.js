@@ -154,115 +154,130 @@ export async function analyzeText(text, options, log = console) {
   const {
     apiKey,
     model,
+    fallbackModels = [],
     timeoutS,
     maxRetries,
     backoffS,
     rateLimitBackoffS = 45,
     reasoning = null,
   } = options;
+  const models = [...new Set([model, ...fallbackModels].filter(Boolean))];
 
   const headers = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${apiKey}`,
   };
 
-  const body = {
-    model,
-    messages: [{ role: "user", content: buildPrompt(text) }],
-    ...(reasoning != null ? { reasoning } : {}),
-  };
-
   let lastErr = /** @type {unknown} */ (null);
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      log.info(
-        `OpenRouter POST attempt ${attempt}/${maxRetries} model=${model} timeout_s=${timeoutS}`
-      );
+  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
+    const currentModel = models[modelIndex];
+    const body = {
+      model: currentModel,
+      messages: [{ role: "user", content: buildPrompt(text) }],
+      ...(reasoning != null ? { reasoning } : {}),
+    };
 
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), timeoutS * 1000);
+    if (modelIndex > 0) {
+      log.warn(`OpenRouter trying fallback model=${currentModel}`);
+    }
 
-      let resp;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        resp = await fetch(OPENROUTER_URL, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(t);
-      }
-
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => "");
-        const retryAfterS = parseRetryAfterSeconds(resp.headers);
-        if (resp.status === 429 && looksLikeQuotaExhausted(errText)) {
-          throw new OpenRouterRateLimitError(
-            `HTTP 429 quota/rate limit: ${errText.slice(0, 500)}`,
-            { retryAfterS, quotaExhausted: true, status: resp.status }
-          );
-        }
-
-        const err = new Error(`HTTP ${resp.status}: ${errText.slice(0, 500)}`);
-        /** @type {Error & { httpStatus?: number, retryAfterS?: number | null }} */
-        const tagged = err;
-        tagged.httpStatus = resp.status;
-        tagged.retryAfterS = retryAfterS;
-        throw tagged;
-      }
-
-      const raw = await resp.json();
-      const content =
-        raw?.choices?.[0]?.message?.content != null
-          ? String(raw.choices[0].message.content)
-          : "";
-
-      const parsed = extractJsonObject(content);
-      log.info(`OpenRouter parse ok (attempt ${attempt}/${maxRetries})`);
-      return { normalized: normalizePayload(parsed), raw };
-    } catch (e) {
-      lastErr = e;
-      if (e instanceof OpenRouterRateLimitError && e.quotaExhausted) {
-        log.error(`OpenRouter quota/rate limit exhausted: ${String(e)}`);
-        throw e;
-      }
-
-      if (attempt < maxRetries) {
-        const tagged = /** @type {Error & { httpStatus?: number, retryAfterS?: number | null }} */ (
-          e
+        log.info(
+          `OpenRouter POST attempt ${attempt}/${maxRetries} model=${currentModel} timeout_s=${timeoutS}`
         );
-        const is429 = tagged.httpStatus === 429 || /HTTP 429\b/.test(String(e));
 
-        let waitS;
-        if (is429) {
-          const fromHeader =
-            tagged.retryAfterS != null && tagged.retryAfterS > 0
-              ? tagged.retryAfterS
-              : null;
-          waitS =
-            fromHeader != null
-              ? fromHeader
-              : Math.max(rateLimitBackoffS * attempt, 15);
-          waitS += jitterSeconds(4);
-          log.warn(
-            `OpenRouter rate limited (429), attempt ${attempt}/${maxRetries}; waiting ${Math.round(waitS)}s (free models are often throttled; consider a paid model or BYOK)`
-          );
-        } else {
-          waitS = backoffS * attempt;
-          log.warn(
-            `OpenRouter attempt ${attempt}/${maxRetries} failed: ${String(e)}; retry in ${waitS}s`
-          );
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), timeoutS * 1000);
+
+        let resp;
+        try {
+          resp = await fetch(OPENROUTER_URL, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(t);
         }
 
-        await delay(waitS * 1000);
-        continue;
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => "");
+          const retryAfterS = parseRetryAfterSeconds(resp.headers);
+          if (resp.status === 429 && looksLikeQuotaExhausted(errText)) {
+            throw new OpenRouterRateLimitError(
+              `HTTP 429 quota/rate limit: ${errText.slice(0, 500)}`,
+              { retryAfterS, quotaExhausted: true, status: resp.status }
+            );
+          }
+
+          const err = new Error(`HTTP ${resp.status}: ${errText.slice(0, 500)}`);
+          /** @type {Error & { httpStatus?: number, retryAfterS?: number | null }} */
+          const tagged = err;
+          tagged.httpStatus = resp.status;
+          tagged.retryAfterS = retryAfterS;
+          throw tagged;
+        }
+
+        const raw = await resp.json();
+        const content =
+          raw?.choices?.[0]?.message?.content != null
+            ? String(raw.choices[0].message.content)
+            : "";
+
+        const parsed = extractJsonObject(content);
+        log.info(`OpenRouter parse ok (attempt ${attempt}/${maxRetries}) model=${currentModel}`);
+        return { normalized: normalizePayload(parsed), raw };
+      } catch (e) {
+        lastErr = e;
+        if (e instanceof OpenRouterRateLimitError && e.quotaExhausted) {
+          if (modelIndex < models.length - 1) {
+            log.warn(
+              `OpenRouter quota/rate limit exhausted for model=${currentModel}; trying next model`
+            );
+            break;
+          }
+          log.error(`OpenRouter quota/rate limit exhausted: ${String(e)}`);
+          throw e;
+        }
+
+        if (attempt < maxRetries) {
+          const tagged = /** @type {Error & { httpStatus?: number, retryAfterS?: number | null }} */ (
+            e
+          );
+          const is429 = tagged.httpStatus === 429 || /HTTP 429\b/.test(String(e));
+
+          let waitS;
+          if (is429) {
+            const fromHeader =
+              tagged.retryAfterS != null && tagged.retryAfterS > 0
+                ? tagged.retryAfterS
+                : null;
+            waitS =
+              fromHeader != null
+                ? fromHeader
+                : Math.max(rateLimitBackoffS * attempt, 15);
+            waitS += jitterSeconds(4);
+            log.warn(
+              `OpenRouter rate limited (429), attempt ${attempt}/${maxRetries}; waiting ${Math.round(waitS)}s (free models are often throttled; consider a paid model or BYOK)`
+            );
+          } else {
+            waitS = backoffS * attempt;
+            log.warn(
+              `OpenRouter attempt ${attempt}/${maxRetries} failed: ${String(e)}; retry in ${waitS}s`
+            );
+          }
+
+          await delay(waitS * 1000);
+          continue;
+        }
+        log.error(`OpenRouter giving up after ${maxRetries} attempts: ${String(e)}`);
+        throw new Error(
+          `OpenRouter call failed after ${maxRetries} attempts: ${String(lastErr)}`
+        );
       }
-      log.error(`OpenRouter giving up after ${maxRetries} attempts: ${String(e)}`);
-      throw new Error(
-        `OpenRouter call failed after ${maxRetries} attempts: ${String(lastErr)}`
-      );
     }
   }
 
