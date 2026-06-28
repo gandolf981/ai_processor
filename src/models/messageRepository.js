@@ -12,6 +12,27 @@ const projection = {
   processor: 1,
 };
 
+/** @param {import('mongodb').Document | null | undefined} doc */
+function isProcessorComplete(doc) {
+  const p = doc?.processor;
+  if (p == null || typeof p !== "object" || Array.isArray(p)) {
+    return false;
+  }
+  return (
+    Object.prototype.hasOwnProperty.call(p, "result") &&
+    Object.prototype.hasOwnProperty.call(p, "type")
+  );
+}
+
+/** Docs missing processor or lacking result/type (see README idempotency rules). */
+const unprocessedFilter = {
+  $or: [
+    { processor: { $exists: false } },
+    { "processor.result": { $exists: false } },
+    { "processor.type": { $exists: false } },
+  ],
+};
+
 export class MessageRepository {
   /**
    * @param {import('mongodb').Collection} collection
@@ -21,33 +42,26 @@ export class MessageRepository {
   }
 
   /**
-   * Scan forward from lastId; skip docs that already have `processor`.
+   * Next document after lastId that still needs processing (no/incomplete processor).
    * @param {unknown} lastId
    * @returns {Promise<{ doc: import('mongodb').WithId<import('mongodb').Document> | null, lastId: unknown }>}
    */
   async findNextUnprocessed(lastId) {
-    let cursorLastId = lastId;
+    const filter =
+      lastId != null
+        ? { _id: { $gt: lastId }, ...unprocessedFilter }
+        : unprocessedFilter;
 
-    for (;;) {
-      const filter =
-        cursorLastId != null ? { _id: { $gt: cursorLastId } } : {};
+    const doc = await this.collection.findOne(filter, {
+      projection,
+      sort: { _id: 1 },
+    });
 
-      const doc = await this.collection.findOne(filter, {
-        projection,
-        sort: { _id: 1 },
-      });
-
-      if (!doc) {
-        return { doc: null, lastId: null };
-      }
-
-      cursorLastId = doc._id;
-      if (Object.prototype.hasOwnProperty.call(doc, "processor")) {
-        continue;
-      }
-
-      return { doc, lastId: cursorLastId };
+    if (!doc) {
+      return { doc: null, lastId: null };
     }
+
+    return { doc, lastId: doc._id };
   }
 
   /**
@@ -61,7 +75,7 @@ export class MessageRepository {
       { projection: { _id: 1, processor: 1 } }
     );
     if (!current) return "missing";
-    if (Object.prototype.hasOwnProperty.call(current, "processor")) {
+    if (isProcessorComplete(current)) {
       return "already";
     }
 

@@ -49,9 +49,9 @@ export async function runWorkerForever(view) {
       view.info(`poll: fetching next unprocessed after _id=${lastId}`);
 
       const { doc, lastId: newLastId } = await repo.findNextUnprocessed(lastId);
-      lastId = newLastId;
 
       if (!doc) {
+        lastId = newLastId;
         const now = Date.now() / 1000;
         const interval = settings.idleLogIntervalS;
         if (
@@ -92,6 +92,7 @@ export async function runWorkerForever(view) {
         } else view.info(`mongo updated processor _id=${_id}`);
 
         processed += 1;
+        lastId = _id;
         view.info(`done document _id=${_id} processed_total=${processed}`);
         view.info(`cooldown: sleeping ${settings.sleepS}s before next job`);
         await delay(settings.sleepS * 1000);
@@ -114,6 +115,7 @@ export async function runWorkerForever(view) {
         } else view.info(`mongo updated processor _id=${_id}`);
 
         processed += 1;
+        lastId = _id;
         view.info(`done document _id=${_id} processed_total=${processed}`);
       } catch (e) {
         view.error(`OpenRouter failed _id=${_id} (will retry later)`, e);
