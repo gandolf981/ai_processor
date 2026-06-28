@@ -47,8 +47,12 @@ export function loadWorkerSettings() {
 }
 
 export function loadOpenRouterSettings() {
+  const baseUrl = (
+    process.env.OPENROUTER_BASE_URL ||
+    "https://openrouter.ai/api/v1/chat/completions"
+  ).trim();
   const apiKey = (process.env.OPENROUTER_API_KEY || "").trim();
-  if (!apiKey) {
+  if (!apiKey && /openrouter\.ai/i.test(baseUrl)) {
     throw new Error("OPENROUTER_API_KEY is required");
   }
   let model = (
@@ -77,6 +81,7 @@ export function loadOpenRouterSettings() {
   }
 
   return {
+    baseUrl,
     apiKey,
     model,
     fallbackModels,

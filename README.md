@@ -59,6 +59,7 @@ docker compose logs -f telegram-processor
 - **`MONGO_URI`**: پیشنهاد:
   - `mongodb://administrator:<PASSWORD>@144.172.92.16:27017/?authSource=admin`
 - **`OPENROUTER_API_KEY`**: کلید OpenRouter
+- **`OPENROUTER_BASE_URL`**: آدرس endpoint سازگار با OpenAI؛ پیش‌فرض `https://openrouter.ai/api/v1/chat/completions`. برای سرور بدون کلید می‌توانید مثل `http://your-server/v1/chat/completions` تنظیم کنید.
 - **`OPENROUTER_MODEL`**: پیش‌فرض `google/gemma-4-26b-a4b-it:free`
 - **`OPENROUTER_FALLBACK_MODELS`**: مدل‌های جایگزین با کاما، برای تلاش سریع بعد از quota/rate limit مدل اصلی؛ مثال `openai/gpt-4o-mini,google/gemini-flash-1.5`.
 - **`OPENROUTER_QUOTA_COOLDOWN_SECONDS`**: مکث worker بعد از خطای quota/rate limit روزانه OpenRouter وقتی مدل جایگزین جواب ندهد؛ پیش‌فرض `5` ثانیه.

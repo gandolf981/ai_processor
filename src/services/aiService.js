@@ -4,8 +4,6 @@
 
 import { setTimeout as delay } from "node:timers/promises";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-
 export class OpenRouterRateLimitError extends Error {
   /**
    * @param {string} message
@@ -152,6 +150,7 @@ function normalizePayload(payload) {
  */
 export async function analyzeText(text, options, log = console) {
   const {
+    baseUrl = "https://openrouter.ai/api/v1/chat/completions",
     apiKey,
     model,
     fallbackModels = [],
@@ -165,8 +164,10 @@ export async function analyzeText(text, options, log = console) {
 
   const headers = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${apiKey}`,
   };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
 
   let lastErr = /** @type {unknown} */ (null);
 
@@ -193,7 +194,7 @@ export async function analyzeText(text, options, log = console) {
 
         let resp;
         try {
-          resp = await fetch(OPENROUTER_URL, {
+          resp = await fetch(baseUrl, {
             method: "POST",
             headers,
             body: JSON.stringify(body),
