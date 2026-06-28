@@ -46,7 +46,7 @@ export async function runWorkerForever(view) {
 
   for (;;) {
     try {
-      view.debug(`poll: fetching next unprocessed after _id=${lastId}`);
+      view.info(`poll: fetching next unprocessed after _id=${lastId}`);
 
       const { doc, lastId: newLastId } = await repo.findNextUnprocessed(lastId);
       lastId = newLastId;
