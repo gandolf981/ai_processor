@@ -51,6 +51,33 @@ export class MessageRepository {
   }
 
   /**
+   * Fetch up to `limit` docs that do not have `processor`, scanning forward from lastId.
+   * @param {unknown} lastId
+   * @param {number} limit
+   * @returns {Promise<{ docs: import('mongodb').WithId<import('mongodb').Document>[], lastId: unknown }>}
+   */
+  async findUnprocessedBatch(lastId, limit) {
+    const safeLimit = Math.max(1, Math.floor(Number(limit) || 1));
+    const filter =
+      lastId != null
+        ? { _id: { $gt: lastId }, processor: { $exists: false } }
+        : { processor: { $exists: false } };
+
+    const docs = await this.collection
+      .find(filter, {
+        projection,
+        sort: { _id: 1 },
+        limit: safeLimit,
+      })
+      .toArray();
+
+    return {
+      docs,
+      lastId: docs.length > 0 ? docs[docs.length - 1]._id : null,
+    };
+  }
+
+  /**
    * @param {unknown} _id
    * @param {Record<string, unknown>} processorPayload
    * @returns {Promise<'written' | 'missing' | 'already'>}

@@ -36,10 +36,15 @@ export function loadWorkerSettings() {
   let idleLogIntervalS = num(process.env.IDLE_LOG_INTERVAL_SECONDS, 30);
   if (idleLogIntervalS < 0) idleLogIntervalS = 0;
 
+  let batchSize = Math.floor(num(process.env.BATCH_SIZE, 25));
+  if (batchSize < 1) batchSize = 1;
+  if (batchSize > 100) batchSize = 100;
+
   return {
     mongoUri,
     dbName,
     collectionName,
+    batchSize,
     sleepS,
     idleSleepS,
     idleLogIntervalS,

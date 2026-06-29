@@ -80,6 +80,51 @@ function buildPrompt(text) {
   );
 }
 
+function buildBatchPrompt(items) {
+  const payload = items.map((item) => ({
+    id: String(item.id),
+    text: String(item.text ?? ""),
+  }));
+
+  return (
+    "You are a classifier+extractor for Telegram messages.\n" +
+    "Given EACH input item, do ALL of the following independently:\n" +
+    "1) Decide the message type: News | Analysis | Signal | Signal-live | Other\n" +
+    "2) Provide type_confidence (0..1)\n" +
+    "3) Build a JSON 'structure' appropriate to the type, and provide structure_confidence (0..1)\n" +
+    "4) Provide 'result' as a short plain-text summary of the message (NO reasoning, NO markdown, no extra formatting)\n\n" +
+    "SIGNAL RULE (very important):\n" +
+    "- Only output type=Signal if the message clearly contains a tradable signal with enough fields to fill the Signal schema.\n" +
+    "- If the message is clearly signal-like (e.g. a live call to buy/sell an asset) but you CANNOT reliably fill the Signal schema " +
+    '(too short/vague: unclear symbol formatting, missing entry/SL/TP, ambiguous instrument - e.g. "Gold Sell now"), ' +
+    "use type=Signal-live (NOT Signal, NOT Other).\n" +
+    "- Signal-live: structure MUST be {} ; structure_confidence should reflect that structure is intentionally empty.\n" +
+    "- If it is NOT signal-like at all, classify as Other.\n\n" +
+    "STRUCTURE SCHEMAS (use ONLY the schema for the selected type):\n" +
+    "- If type=News, structure must be an object with keys:\n" +
+    '  {"topic": string, "industry": string|null, "tags": string[], "news_summary": string, "news_analysis": string|null, ' +
+    '   "market_impact": "Bullish"|"Bearish"|"Neutral"|"Unknown"}\n' +
+    "- If type=Analysis, structure must be an object with keys:\n" +
+    '  {"topic": string, "industry": string|null, "tags": string[], "analysis_summary": string, ' +
+    '   "expected_market_impact": "Bullish"|"Bearish"|"Neutral"|"Unknown"}\n' +
+    "- If type=Signal, structure must be an object with keys:\n" +
+    '  {"symbol": string, "action": "BUY"|"SELL", "entry": string|null, "stop_loss": number|null, ' +
+    '   "take_profits": (number|string)[]|null, "note": string|null}\n' +
+    "- If type=Other, structure must be an empty object: {}\n" +
+    "- If type=Signal-live, structure must be an empty object: {} (short/live signal text only; no forced fields).\n\n" +
+    "OUTPUT REQUIREMENTS:\n" +
+    "- Output MUST be a single JSON object and NOTHING ELSE.\n" +
+    '- JSON keys MUST be exactly: "items"\n' +
+    '- "items" MUST be an array with exactly one result per input item.\n' +
+    "- Preserve every input id exactly.\n" +
+    "- Each result item keys MUST be exactly: id, result, type, type_confidence, structure_confidence, structure\n" +
+    "- type must be exactly one of: News, Analysis, Signal, Signal-live, Other\n" +
+    "- type_confidence and structure_confidence must be numbers between 0 and 1.\n\n" +
+    "Input items JSON:\n" +
+    `${JSON.stringify(payload)}\n`
+  );
+}
+
 function extractJsonObject(s) {
   let t = String(s).trim();
   try {
@@ -145,10 +190,29 @@ function normalizePayload(payload) {
   };
 }
 
+function normalizeBatchPayload(payload, expectedIds) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const expected = new Set(expectedIds.map(String));
+  const normalizedById = new Map();
+
+  for (const item of items) {
+    const id = String(item?.id ?? "");
+    if (!expected.has(id) || normalizedById.has(id)) continue;
+    normalizedById.set(id, normalizePayload(item));
+  }
+
+  const missing = [...expected].filter((id) => !normalizedById.has(id));
+  if (missing.length > 0) {
+    throw new Error(`Batch response missing result(s) for id(s): ${missing.join(", ")}`);
+  }
+
+  return normalizedById;
+}
+
 /**
  * @param {object} log - { info, warn, error } from View or shared logger
  */
-export async function analyzeText(text, options, log = console) {
+async function postChatCompletion(prompt, options, log = console) {
   const {
     baseUrl = "https://openrouter.ai/api/v1/chat/completions",
     apiKey,
@@ -175,7 +239,7 @@ export async function analyzeText(text, options, log = console) {
     const currentModel = models[modelIndex];
     const body = {
       model: currentModel,
-      messages: [{ role: "user", content: buildPrompt(text) }],
+      messages: [{ role: "user", content: prompt }],
       ...(reasoning != null ? { reasoning } : {}),
     };
 
@@ -230,7 +294,7 @@ export async function analyzeText(text, options, log = console) {
 
         const parsed = extractJsonObject(content);
         log.info(`OpenRouter parse ok (attempt ${attempt}/${maxRetries}) model=${currentModel}`);
-        return { normalized: normalizePayload(parsed), raw };
+        return { parsed, raw };
       } catch (e) {
         lastErr = e;
         if (e instanceof OpenRouterRateLimitError && e.quotaExhausted) {
@@ -283,6 +347,37 @@ export async function analyzeText(text, options, log = console) {
   }
 
   throw new Error(`OpenRouter call failed: ${String(lastErr)}`);
+}
+
+/**
+ * @param {object} log - { info, warn, error } from View or shared logger
+ */
+export async function analyzeText(text, options, log = console) {
+  const { parsed, raw } = await postChatCompletion(buildPrompt(text), options, log);
+  return { normalized: normalizePayload(parsed), raw };
+}
+
+/**
+ * @param {{ id: string, text: string }[]} items
+ * @param {object} options
+ * @param {object} log - { info, warn, error } from View or shared logger
+ */
+export async function analyzeTextBatch(items, options, log = console) {
+  if (items.length === 0) return { normalizedById: new Map(), raw: null };
+
+  const { parsed, raw } = await postChatCompletion(
+    buildBatchPrompt(items),
+    options,
+    log
+  );
+
+  return {
+    normalizedById: normalizeBatchPayload(
+      parsed,
+      items.map((item) => item.id)
+    ),
+    raw,
+  };
 }
 
 export function defaultProcessorForEmptyText() {
