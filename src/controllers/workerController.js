@@ -52,6 +52,7 @@ export async function runWorkerForever(view) {
         `poll: fetching up to ${settings.batchSize} unprocessed after _id=${lastId}`
       );
 
+      const previousLastId = lastId;
       const { docs, lastId: newLastId } = await repo.findUnprocessedBatch(
         lastId,
         settings.batchSize
@@ -139,6 +140,8 @@ export async function runWorkerForever(view) {
           }
         } catch (e) {
           view.error(`OpenRouter batch failed items=${aiItems.length} (will retry later)`, e);
+          lastId = previousLastId;
+          view.warn(`batch failed; resetting cursor to _id=${lastId} for retry`);
           if (e instanceof OpenRouterRateLimitError && e.quotaExhausted) {
             const waitS =
               e.retryAfterS != null && e.retryAfterS > 0

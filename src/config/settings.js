@@ -97,12 +97,12 @@ export function loadOpenRouterSettings() {
     /** Base seconds for HTTP 429 when `Retry-After` is missing (free tiers hit upstream limits often). */
     rateLimitBackoffS: Math.max(
       5,
-      num(process.env.OPENROUTER_RATE_LIMIT_BACKOFF_SECONDS, 45)
+      num(process.env.OPENROUTER_RATE_LIMIT_BACKOFF_SECONDS, 120)
     ),
     /** Worker-level pause when OpenRouter reports quota exhaustion/free-model daily limits. */
     quotaCooldownS: Math.max(
       5,
-      num(process.env.OPENROUTER_QUOTA_COOLDOWN_SECONDS, 5)
+      num(process.env.OPENROUTER_QUOTA_COOLDOWN_SECONDS, 300)
     ),
   };
 }

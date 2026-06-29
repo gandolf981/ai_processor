@@ -38,8 +38,7 @@ function looksLikeQuotaExhausted(errText) {
   const s = String(errText).toLowerCase();
   return (
     s.includes("free-models-per-day") ||
-    s.includes("add 10 credits") ||
-    s.includes("accumulate your rate limits")
+    s.includes("add 10 credits")
   );
 }
 
