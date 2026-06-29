@@ -8,7 +8,7 @@ import { MongoClient, MongoError } from "mongodb";
 import { loadOpenRouterSettings, loadWorkerSettings } from "../config/settings.js";
 import { MessageRepository } from "../models/messageRepository.js";
 import {
-  analyzeText,
+  analyzeTextBatch,
   defaultProcessorForEmptyText,
 } from "../services/aiService.js";
 
@@ -37,7 +37,7 @@ export async function runWorkerForever(view) {
 
   view.info(
     `Mongo connected; worker running model=${openRouter.model} ` +
-      `sleep_s=${settings.sleepS} idle_sleep_s=${settings.idleSleepS}`
+      `batch_size=${settings.batchSize} sleep_s=${settings.sleepS} idle_sleep_s=${settings.idleSleepS}`
   );
 
   let processed = 0;
@@ -46,12 +46,18 @@ export async function runWorkerForever(view) {
 
   for (;;) {
     try {
-      view.debug(`poll: fetching next unprocessed after _id=${lastId}`);
+      view.debug(
+        `poll: fetching up to ${settings.batchSize} unprocessed after _id=${lastId}`
+      );
 
-      const { doc, lastId: newLastId } = await repo.findNextUnprocessed(lastId);
+      const previousLastId = lastId;
+      const { docs, lastId: newLastId } = await repo.findUnprocessedBatch(
+        lastId,
+        settings.batchSize
+      );
       lastId = newLastId;
 
-      if (!doc) {
+      if (docs.length === 0) {
         const now = Date.now() / 1000;
         const interval = settings.idleLogIntervalS;
         if (
@@ -69,54 +75,72 @@ export async function runWorkerForever(view) {
       }
 
       lastIdleLogAt = null;
+      view.info(`picked batch size=${docs.length} last_id=${lastId}`);
 
-      const _id = doc._id;
-      const text = doc.text != null ? String(doc.text) : "";
-      const channel = doc.channel;
-      const messageId = doc.message_id;
+      const aiItems = [];
+      const docsByBatchId = new Map();
 
-      view.info(
-        `picked document _id=${_id} channel=${channel} message_id=${messageId}`
-      );
+      for (const doc of docs) {
+        const _id = doc._id;
+        const text = doc.text != null ? String(doc.text) : "";
+        const channel = doc.channel;
+        const messageId = doc.message_id;
 
-      const empty = typeof text !== "string" || !text.trim();
-      if (empty) {
-        const normalized = defaultProcessorForEmptyText();
-        view.info(`empty text: applying default processor _id=${_id} (no AI call)`);
-        view.debug(`processor payload _id=${_id} payload=${JSON.stringify(normalized)}`);
+        view.info(
+          `batch item _id=${_id} channel=${channel} message_id=${messageId} text_len=${text.length}`
+        );
 
-        const w = await repo.writeProcessor(_id, normalized);
-        if (w === "missing") view.warn(`mongo skip write: document gone _id=${_id}`);
-        else if (w === "already") {
-          view.info(`mongo skip write: processor already set _id=${_id}`);
-        } else view.info(`mongo updated processor _id=${_id}`);
+        const empty = typeof text !== "string" || !text.trim();
+        if (empty) {
+          const normalized = defaultProcessorForEmptyText();
+          view.info(`empty text: applying default processor _id=${_id} (no AI call)`);
+          view.debug(`processor payload _id=${_id} payload=${JSON.stringify(normalized)}`);
 
-        processed += 1;
-        view.info(`done document _id=${_id} processed_total=${processed}`);
-        view.info(`cooldown: sleeping ${settings.sleepS}s before next job`);
-        await delay(settings.sleepS * 1000);
-        continue;
+          const w = await repo.writeProcessor(_id, normalized);
+          if (w === "missing") view.warn(`mongo skip write: document gone _id=${_id}`);
+          else if (w === "already") {
+            view.info(`mongo skip write: processor already set _id=${_id}`);
+          } else view.info(`mongo updated processor _id=${_id}`);
+
+          processed += 1;
+          view.info(`done document _id=${_id} processed_total=${processed}`);
+          continue;
+        }
+
+        const batchId = String(aiItems.length + 1);
+        aiItems.push({ id: batchId, text });
+        docsByBatchId.set(batchId, doc);
       }
 
-      view.info(
-        `AI request _id=${_id} text_len=${text.length} preview=${JSON.stringify(view.safeRepr(text))}`
-      );
-      view.info(`calling OpenRouter _id=${_id} model=${openRouter.model}`);
+      if (aiItems.length > 0) {
+        view.info(
+          `calling OpenRouter batch items=${aiItems.length} model=${openRouter.model}`
+        );
 
-      try {
-        const { normalized } = await analyzeText(text, openRouter, aiLog);
-        view.info(`OpenRouter ok _id=${_id} result=${JSON.stringify(normalized)}`);
+        try {
+          const { normalizedById } = await analyzeTextBatch(aiItems, openRouter, aiLog);
 
-        const w = await repo.writeProcessor(_id, normalized);
-        if (w === "missing") view.warn(`mongo skip write: document gone _id=${_id}`);
-        else if (w === "already") {
-          view.info(`mongo skip write: processor already set _id=${_id}`);
-        } else view.info(`mongo updated processor _id=${_id}`);
+          for (const [batchId, normalized] of normalizedById) {
+            const doc = docsByBatchId.get(batchId);
+            if (!doc) continue;
 
-        processed += 1;
-        view.info(`done document _id=${_id} processed_total=${processed}`);
-      } catch (e) {
-        view.error(`OpenRouter failed _id=${_id} (will retry later)`, e);
+            const _id = doc._id;
+            view.info(`OpenRouter ok _id=${_id} result=${JSON.stringify(normalized)}`);
+
+            const w = await repo.writeProcessor(_id, normalized);
+            if (w === "missing") view.warn(`mongo skip write: document gone _id=${_id}`);
+            else if (w === "already") {
+              view.info(`mongo skip write: processor already set _id=${_id}`);
+            } else view.info(`mongo updated processor _id=${_id}`);
+
+            processed += 1;
+            view.info(`done document _id=${_id} processed_total=${processed}`);
+          }
+        } catch (e) {
+          view.error(`OpenRouter batch failed items=${aiItems.length} (will retry later)`, e);
+          lastId = previousLastId;
+          view.warn(`batch failed; resetting cursor to _id=${lastId} for retry`);
+        }
       }
 
       view.info(`cooldown: sleeping ${settings.sleepS}s before next job`);

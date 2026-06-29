@@ -11,3 +11,4 @@ services:
       MONGO_DB: ${MONGO_DB:-test_telegram_db}
       MONGO_COLLECTION: ${MONGO_COLLECTION:-message}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-26b-a4b-it:free}
+      BATCH_SIZE: ${BATCH_SIZE:-25}
